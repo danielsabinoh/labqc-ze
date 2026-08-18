@@ -1,0 +1,58 @@
+# Build do .NET
+**/bin/
+**/obj/
+artifacts/
+
+# Visual Studio / Rider / VS Code
+.vs/
+.idea/
+.vscode/
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+_ReSharper*/
+*.DotSettings.user
+
+# Publicações e arquivos gerados pelo projeto
+outputs/
+LabQC-App/
+work/
+
+# Banco de dados local e arquivos auxiliares do SQLite
+*.db
+*.db-shm
+*.db-wal
+*.sqlite
+*.sqlite3
+
+# Certificados, backups e relatórios gerados
+Certificados/
+Backups/
+*.labbackup
+*.pdf
+
+# Ferramentas locais do .NET
+.store/
+.dotnet/
+
+# Resultados de testes e cobertura
+TestResults/
+coverage/
+coverage.*
+*.trx
+
+# Pacotes e símbolos
+*.nupkg
+*.snupkg
+
+# Logs e arquivos temporários
+*.log
+*.tmp
+*.temp
+~$*
+
+# Sistema operacional
+Thumbs.db
+Desktop.ini
+.DS_Store

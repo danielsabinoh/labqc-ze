@@ -1,0 +1,12 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/LabQC.Application/LabQC.Application.csproj" />
+    <Project Path="src/LabQC.Desktop/LabQC.Desktop.csproj" />
+    <Project Path="src/LabQC.Domain/LabQC.Domain.csproj" />
+    <Project Path="src/LabQC.Infrastructure/LabQC.Infrastructure.csproj" />
+    <Project Path="src/LabQC.Reports/LabQC.Reports.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/LabQC.Tests/LabQC.Tests.csproj" />
+  </Folder>
+</Solution>
