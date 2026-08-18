@@ -14,11 +14,11 @@ Para testes ou instalação portátil, defina `LABQC_DATA_DIR` para outra pasta 
 ## Primeiro uso
 
 1. Entre como administrador.
-2. Abra **Produtos** e use **+ Parâmetro** para cadastrar Umidade, Acidez, pH etc.
-3. Use **+ Produto** para cadastrar o produto.
-4. Clique em **Nova versão da especificação**, escolha o produto, marque os parâmetros e configure limites e consolidação.
-5. Abra **Lotes e histórico** e clique em **+ Abrir novo lote**. A configuração ativa será congelada no lote.
-6. Abra **Lançar análises**, selecione o lote, crie amostras, preencha os resultados e salve. Enter desce na coluna; `Ctrl+N` cria uma amostra e `Ctrl+S` salva.
+2. Abra **Produtos** e use **+ Parâmetro** para cadastrar Umidade, Acidez, pH etc. A busca filtra por nome, código, categoria ou unidade.
+3. Use **+ Produto** para cadastrar o produto e configure suas análises quando o sistema perguntar. Um produto também pode ser alterado, duplicado ou arquivado nessa mesma tela.
+4. Abra **Lançar análises**, escolha primeiro a família padronizada (**Farinha**, **Polvilho**, **Fécula**, **Amido** ou **Outros**), depois o produto/unidade e, por fim, o lote aberto. Se o lote ainda não existir, use **+ Iniciar novo lote** sem sair da tela.
+5. Na abertura do lote, informe produto, número e data de fabricação. A validade é calculada automaticamente e as análises exigidas aparecem antes da confirmação.
+6. Crie amostras, preencha os resultados e salve. Enter desce na coluna; `Ctrl+N` cria uma amostra e `Ctrl+S` salva.
 7. Quando a produção terminar, selecione o lote em **Lotes e histórico** e clique em **Fechar lote**. Dois cliques abrem o resumo completo das análises.
 8. Abra **Certificados**, clique em **Emitir certificado / laudo**, informe cliente, NF e quantidade e gere o PDF A4. Somente lotes fechados ficam disponíveis para emissão.
 
@@ -26,7 +26,15 @@ O PDF fica em `%LOCALAPPDATA%\LabQC\Certificados` e também pode ser aberto pela
 
 Alterar uma especificação cria outra versão; lotes antigos continuam ligados ao snapshot anterior.
 
+O dashboard mostra lotes abertos, pendências, resultados fora da especificação e os lotes recentes. Produtos e parâmetros sem histórico são excluídos; quando já foram utilizados, são apenas arquivados para preservar resultados e laudos antigos.
+
+A família é definida no cadastro do produto e também pode ser alterada ou preservada ao duplicá-lo. Na atualização de bancos anteriores, nomes contendo Farinha, Polvilho, Fécula ou Amido são classificados automaticamente; os demais entram em Outros.
+
 Use **Minha conta** no menu lateral para alterar nome de usuário, nome completo ou senha. Para salvar mudanças posteriores, a senha atual é obrigatória.
+
+Administradores também possuem a área **Usuários e acessos**. Nela é possível criar um acesso individual com perfil de Analista, Responsável da Qualidade ou Administrador, além de ativar e desativar usuários. Toda senha criada nessa tela é provisória e deve ser trocada pela própria pessoa no primeiro login.
+
+A interface utiliza a identidade visual da Alimentos do Zé, com ícone próprio no executável, logo institucional no login e no menu, e informações da J. C. Oliveira & Filhos Ltda. na área administrativa.
 
 ## Validar
 

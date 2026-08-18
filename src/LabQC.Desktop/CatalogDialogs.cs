@@ -14,6 +14,37 @@ namespace LabQC.Desktop;
 
 internal static class CatalogDialogs
 {
+    public static async Task<bool> NewUserAsync(Window owner, DbContextOptions<LabDbContext> options, Guid administratorId)
+    {
+        var username = Box(); var fullName = Box(); var role = RoleBox();
+        var password = new PasswordBox { Margin = new Thickness(4), Padding = new Thickness(7) };
+        var confirmation = new PasswordBox { Margin = new Thickness(4), Padding = new Thickness(7) };
+        var guidance = new TextBlock { Text = "A pessoa deverá trocar esta senha no primeiro acesso.", Foreground = System.Windows.Media.Brushes.DimGray, Margin = new Thickness(4, 8, 4, 4), TextWrapping = TextWrapping.Wrap };
+        var dialog = Form(owner, "Criar novo acesso", ("Usuário", username), ("Nome completo", fullName), ("Perfil de acesso", role), ("Senha provisória", password), ("Confirme a senha", confirmation), ("", guidance));
+        if (dialog.ShowDialog() != true) return false;
+        if (string.IsNullOrWhiteSpace(username.Text) || string.IsNullOrWhiteSpace(fullName.Text)) { Alert("Informe usuário e nome completo."); return false; }
+        if (password.Password.Length < 8) { Alert("A senha provisória precisa ter pelo menos 8 caracteres."); return false; }
+        if (password.Password != confirmation.Password) { Alert("A confirmação da senha não confere."); return false; }
+        await using var db = new LabDbContext(options);
+        var normalized = username.Text.Trim();
+        if (await db.Users.AnyAsync(x => x.Username == normalized)) { Alert("Esse nome de usuário já está em uso."); return false; }
+        var user = new User { Username = normalized, FullName = fullName.Text.Trim(), Role = ((EnumOption<UserRole>)role.SelectedItem).Value, PasswordHash = PasswordHasher.Hash(password.Password), IsActive = true, MustChangePassword = true };
+        db.Users.Add(user);
+        db.AuditEntries.Add(new AuditEntry { UserId = administratorId, OccurredAt = DateTimeOffset.Now, EntityName = nameof(User), EntityId = user.Id.ToString(), Action = "Acesso criado", NewValue = $"{user.Username}|{user.Role}" });
+        await db.SaveChangesAsync(); return true;
+    }
+
+    public static async Task<bool> ToggleUserAsync(Window owner, DbContextOptions<LabDbContext> options, Guid userId, Guid administratorId)
+    {
+        if (userId == administratorId) { Alert("Você não pode desativar o próprio acesso."); return false; }
+        await using var db = new LabDbContext(options); var user = await db.Users.SingleAsync(x => x.Id == userId);
+        var newStatus = !user.IsActive; var action = newStatus ? "reativar" : "desativar";
+        if (MessageBox.Show($"Deseja {action} o acesso de {user.FullName}?", "Acessos", MessageBoxButton.YesNo, MessageBoxImage.Question) != MessageBoxResult.Yes) return false;
+        user.IsActive = newStatus;
+        db.AuditEntries.Add(new AuditEntry { UserId = administratorId, OccurredAt = DateTimeOffset.Now, EntityName = nameof(User), EntityId = user.Id.ToString(), Action = newStatus ? "Acesso reativado" : "Acesso desativado", OldValue = (!newStatus).ToString(), NewValue = newStatus.ToString() });
+        await db.SaveChangesAsync(); return true;
+    }
+
     public static async Task<User?> EditAccountAsync(Window owner, DbContextOptions<LabDbContext> options, User sessionUser, bool firstAccess)
     {
         var username = Box(sessionUser.Username); var fullName = Box(sessionUser.FullName);
@@ -46,13 +77,13 @@ internal static class CatalogDialogs
 
     public static async Task<bool> NewProductAsync(Window owner, DbContextOptions<LabDbContext> options, Guid userId)
     {
-        var code = Box(); var name = Box(); var unit = Box("saco 50 kg"); var shelf = Box("12");
-        var dialog = Form(owner, "Cadastrar produto", ("Código", code), ("Nome do produto", name), ("Unidade de comercialização", unit), ("Validade (meses)", shelf));
+        var code = Box(); var family = FamilyBox(); var name = Box(); var unit = Box("saco 50 kg"); var shelf = Box("12");
+        var dialog = Form(owner, "Cadastrar produto", ("Código", code), ("Família", family), ("Nome do produto", name), ("Unidade de comercialização", unit), ("Validade (meses)", shelf));
         if (dialog.ShowDialog() != true) return false;
         if (string.IsNullOrWhiteSpace(code.Text) || string.IsNullOrWhiteSpace(name.Text) || !int.TryParse(shelf.Text, out var months) || months <= 0) { Alert("Preencha código, nome e validade corretamente."); return false; }
         await using var db = new LabDbContext(options);
         if (await db.Products.AnyAsync(x => x.Code == code.Text.Trim())) { Alert("Já existe um produto com esse código."); return false; }
-        var product = new Product { Code = code.Text.Trim(), Name = name.Text.Trim(), CommercialUnit = unit.Text.Trim(), ShelfLifeMonths = months };
+        var product = new Product { Code = code.Text.Trim(), Family = (string)family.SelectedItem, Name = name.Text.Trim(), CommercialUnit = unit.Text.Trim(), ShelfLifeMonths = months };
         db.Products.Add(product); await db.SaveChangesAsync();
         if (MessageBox.Show("Produto cadastrado. Deseja configurar agora as análises e os limites?", "Configuração do produto", MessageBoxButton.YesNo, MessageBoxImage.Question) == MessageBoxResult.Yes)
             await ConfigureSpecificationAsync(owner, options, userId, product.Id);
@@ -62,13 +93,13 @@ internal static class CatalogDialogs
     public static async Task<bool> EditProductAsync(Window owner, DbContextOptions<LabDbContext> options, Guid productId, Guid userId)
     {
         await using var db = new LabDbContext(options); var product = await db.Products.SingleAsync(x => x.Id == productId);
-        var code = Box(product.Code); var name = Box(product.Name); var unit = Box(product.CommercialUnit); var shelf = Box(product.ShelfLifeMonths.ToString());
+        var code = Box(product.Code); var family = FamilyBox(product.Family); var name = Box(product.Name); var unit = Box(product.CommercialUnit); var shelf = Box(product.ShelfLifeMonths.ToString());
         var active = new CheckBox { Content = "Produto ativo", IsChecked = product.IsActive, Margin = new Thickness(4, 10, 4, 4) };
-        var dialog = Form(owner, "Alterar produto", ("Código", code), ("Nome do produto", name), ("Unidade de comercialização", unit), ("Validade (meses)", shelf), ("Situação", active));
+        var dialog = Form(owner, "Alterar produto", ("Código", code), ("Família", family), ("Nome do produto", name), ("Unidade de comercialização", unit), ("Validade (meses)", shelf), ("Situação", active));
         if (dialog.ShowDialog() != true) return false;
         if (string.IsNullOrWhiteSpace(code.Text) || string.IsNullOrWhiteSpace(name.Text) || string.IsNullOrWhiteSpace(unit.Text) || !int.TryParse(shelf.Text, out var months) || months <= 0) { Alert("Preencha código, nome, unidade e validade corretamente."); return false; }
         if (await db.Products.AnyAsync(x => x.Code == code.Text.Trim() && x.Id != product.Id)) { Alert("Já existe outro produto com esse código."); return false; }
-        var old = product.DisplayName; product.Code = code.Text.Trim(); product.Name = name.Text.Trim(); product.Description = ""; product.CommercialUnit = unit.Text.Trim(); product.ShelfLifeMonths = months; product.IsActive = active.IsChecked == true;
+        var old = product.DisplayName; product.Code = code.Text.Trim(); product.Family = (string)family.SelectedItem; product.Name = name.Text.Trim(); product.Description = ""; product.CommercialUnit = unit.Text.Trim(); product.ShelfLifeMonths = months; product.IsActive = active.IsChecked == true;
         db.AuditEntries.Add(new AuditEntry { UserId = userId, OccurredAt = DateTimeOffset.Now, EntityName = nameof(Product), EntityId = product.Id.ToString(), Action = "Alterado", OldValue = old, NewValue = product.DisplayName });
         await db.SaveChangesAsync();
         if (product.IsActive && MessageBox.Show("Deseja configurar agora as análises e os limites deste produto?", "Configuração do produto", MessageBoxButton.YesNo, MessageBoxImage.Question) == MessageBoxResult.Yes)
@@ -78,10 +109,45 @@ internal static class CatalogDialogs
 
     public static async Task<bool> DeleteProductAsync(Window owner, DbContextOptions<LabDbContext> options, Guid productId, Guid userId)
     {
-        await using var db = new LabDbContext(options); var product = await db.Products.SingleAsync(x => x.Id == productId);
-        if (!product.IsActive) { Alert("Este produto já está excluído/inativo. Use Alterar produto para reativá-lo."); return false; }
-        if (MessageBox.Show($"Excluir o produto “{product.DisplayName}”?\n\nO histórico de lotes e laudos será preservado.", "Confirmar exclusão", MessageBoxButton.YesNo, MessageBoxImage.Warning) != MessageBoxResult.Yes) return false;
-        product.IsActive = false; db.AuditEntries.Add(new AuditEntry { UserId = userId, OccurredAt = DateTimeOffset.Now, EntityName = nameof(Product), EntityId = product.Id.ToString(), Action = "Inativado", OldValue = "Ativo", NewValue = "Inativo" }); await db.SaveChangesAsync(); return true;
+        await using var db = new LabDbContext(options); var product = await db.Products.Include(x => x.Specifications).SingleAsync(x => x.Id == productId);
+        var hasHistory = await db.Lots.AnyAsync(x => x.ProductId == productId);
+        var action = hasHistory ? "arquivar" : "excluir definitivamente";
+        if (MessageBox.Show($"Deseja {action} o produto “{product.DisplayName}”?\n\n{(hasHistory ? "Os lotes, resultados e laudos antigos serão preservados." : "O produto ainda não possui lotes e será removido do cadastro.")}", "Confirmar", MessageBoxButton.YesNo, MessageBoxImage.Warning) != MessageBoxResult.Yes) return false;
+        if (hasHistory)
+        {
+            product.IsActive = false;
+            db.AuditEntries.Add(new AuditEntry { UserId = userId, OccurredAt = DateTimeOffset.Now, EntityName = nameof(Product), EntityId = product.Id.ToString(), Action = "Arquivado", OldValue = "Ativo", NewValue = "Arquivado" });
+        }
+        else
+        {
+            db.ProductSpecifications.RemoveRange(product.Specifications);
+            db.Products.Remove(product);
+            db.AuditEntries.Add(new AuditEntry { UserId = userId, OccurredAt = DateTimeOffset.Now, EntityName = nameof(Product), EntityId = product.Id.ToString(), Action = "Excluído", OldValue = product.DisplayName });
+        }
+        await db.SaveChangesAsync(); return true;
+    }
+
+    public static async Task<bool> DuplicateProductAsync(Window owner, DbContextOptions<LabDbContext> options, Guid productId, Guid userId)
+    {
+        await using var db = new LabDbContext(options);
+        var source = await db.Products.Include(x => x.Specifications).ThenInclude(x => x.Parameters).SingleAsync(x => x.Id == productId);
+        var code = Box(source.Code + "-COPIA"); var family = FamilyBox(source.Family); var name = Box(source.Name); var unit = Box(source.CommercialUnit); var shelf = Box(source.ShelfLifeMonths.ToString());
+        var dialog = Form(owner, "Duplicar produto", ("Novo código", code), ("Família", family), ("Nome do produto", name), ("Unidade de comercialização", unit), ("Validade (meses)", shelf));
+        if (dialog.ShowDialog() != true) return false;
+        if (string.IsNullOrWhiteSpace(code.Text) || string.IsNullOrWhiteSpace(name.Text) || string.IsNullOrWhiteSpace(unit.Text) || !int.TryParse(shelf.Text, out var months) || months <= 0) { Alert("Preencha código, nome, unidade e validade corretamente."); return false; }
+        if (await db.Products.AnyAsync(x => x.Code == code.Text.Trim())) { Alert("Já existe um produto com esse código."); return false; }
+        var copy = new Product { Code = code.Text.Trim(), Family = (string)family.SelectedItem, Name = name.Text.Trim(), CommercialUnit = unit.Text.Trim(), ShelfLifeMonths = months, IsActive = true };
+        var sourceSpec = source.Specifications.SingleOrDefault(x => x.IsActive);
+        if (sourceSpec is not null)
+        {
+            var spec = new ProductSpecification { Product = copy, ProductId = copy.Id, Version = 1, EffectiveFrom = DateTimeOffset.Now, IsActive = true, ChangeReason = $"Copiado de {source.DisplayName}" };
+            foreach (var item in sourceSpec.Parameters.OrderBy(x => x.SortOrder))
+                spec.Parameters.Add(new ProductSpecificationParameter { AnalysisParameterId = item.AnalysisParameterId, Minimum = item.Minimum, Maximum = item.Maximum, SpecificationText = item.SpecificationText, StandardText = item.StandardText, ConsolidationMethod = item.ConsolidationMethod, SortOrder = item.SortOrder });
+            copy.Specifications.Add(spec);
+        }
+        db.Products.Add(copy);
+        db.AuditEntries.Add(new AuditEntry { UserId = userId, OccurredAt = DateTimeOffset.Now, EntityName = nameof(Product), EntityId = copy.Id.ToString(), Action = "Duplicado", OldValue = source.DisplayName, NewValue = copy.DisplayName });
+        await db.SaveChangesAsync(); return true;
     }
 
     public static async Task<bool> NewParameterAsync(Window owner, DbContextOptions<LabDbContext> options)
@@ -115,9 +181,20 @@ internal static class CatalogDialogs
     public static async Task<bool> DeleteParameterAsync(Window owner, DbContextOptions<LabDbContext> options, Guid parameterId, Guid userId)
     {
         await using var db = new LabDbContext(options); var parameter = await db.AnalysisParameters.SingleAsync(x => x.Id == parameterId);
-        if (!parameter.IsActive) { Alert("Este parâmetro já está excluído/inativo. Use Alterar parâmetro para reativá-lo."); return false; }
-        if (MessageBox.Show($"Excluir o parâmetro “{parameter.Name}”?\n\nResultados e laudos antigos serão preservados.", "Confirmar exclusão", MessageBoxButton.YesNo, MessageBoxImage.Warning) != MessageBoxResult.Yes) return false;
-        parameter.IsActive = false; db.AuditEntries.Add(new AuditEntry { UserId = userId, OccurredAt = DateTimeOffset.Now, EntityName = nameof(AnalysisParameter), EntityId = parameter.Id.ToString(), Action = "Inativado", OldValue = "Ativo", NewValue = "Inativo" }); await db.SaveChangesAsync(); return true;
+        var hasHistory = await db.ProductSpecificationParameters.AnyAsync(x => x.AnalysisParameterId == parameterId) || await db.LotParameters.AnyAsync(x => x.SourceParameterId == parameterId);
+        var action = hasHistory ? "arquivar" : "excluir definitivamente";
+        if (MessageBox.Show($"Deseja {action} o parâmetro “{parameter.Name}”?\n\n{(hasHistory ? "Resultados, especificações e laudos antigos serão preservados." : "O parâmetro ainda não foi utilizado e será removido do cadastro.")}", "Confirmar", MessageBoxButton.YesNo, MessageBoxImage.Warning) != MessageBoxResult.Yes) return false;
+        if (hasHistory)
+        {
+            parameter.IsActive = false;
+            db.AuditEntries.Add(new AuditEntry { UserId = userId, OccurredAt = DateTimeOffset.Now, EntityName = nameof(AnalysisParameter), EntityId = parameter.Id.ToString(), Action = "Arquivado", OldValue = "Ativo", NewValue = "Arquivado" });
+        }
+        else
+        {
+            db.AnalysisParameters.Remove(parameter);
+            db.AuditEntries.Add(new AuditEntry { UserId = userId, OccurredAt = DateTimeOffset.Now, EntityName = nameof(AnalysisParameter), EntityId = parameter.Id.ToString(), Action = "Excluído", OldValue = parameter.Name });
+        }
+        await db.SaveChangesAsync(); return true;
     }
 
     public static async Task<bool> ConfigureSpecificationAsync(Window owner, DbContextOptions<LabDbContext> options, Guid userId, Guid productId)
@@ -159,22 +236,34 @@ internal static class CatalogDialogs
         await db.SaveChangesAsync(); return true;
     }
 
-    public static async Task<bool> NewLotAsync(Window owner, DbContextOptions<LabDbContext> options, Guid userId)
+    public static async Task<Guid?> NewLotAsync(Window owner, DbContextOptions<LabDbContext> options, Guid userId, Guid? preferredProductId = null)
     {
         await using var db = new LabDbContext(options);
         var products = await db.Products.Include(x => x.Specifications).ThenInclude(x => x.Parameters).ThenInclude(x => x.AnalysisParameter).Where(x => x.IsActive).OrderBy(x => x.Name).ToListAsync();
         products = products.Where(x => x.Specifications.Any(s => s.IsActive)).ToList();
-        if (products.Count == 0) { Alert("Nenhum produto possui especificação ativa. Crie uma versão da especificação primeiro."); return false; }
-        var product = new ComboBox { ItemsSource = products, DisplayMemberPath = "DisplayName", SelectedIndex = 0, Margin = new Thickness(4) };
-        var number = Box(); var origin = Box("Produção"); var manufacture = Box(DateTime.Today.ToString("dd/MM/yyyy"));
-        var dialog = Form(owner, "Abrir novo lote", ("Produto", product), ("Número do lote", number), ("Origem", origin), ("Data de fabricação", manufacture));
-        if (dialog.ShowDialog() != true) return false;
-        if (!DateOnly.TryParseExact(manufacture.Text.Trim(), "dd/MM/yyyy", null, System.Globalization.DateTimeStyles.None, out var date) || string.IsNullOrWhiteSpace(number.Text)) { Alert("Informe o número do lote e a data corretamente."); return false; }
+        if (products.Count == 0) { Alert("Nenhum produto possui análises configuradas. Configure o produto primeiro."); return null; }
+        var product = new ComboBox { ItemsSource = products, DisplayMemberPath = "DisplayName", SelectedItem = products.FirstOrDefault(x => x.Id == preferredProductId) ?? products[0], Margin = new Thickness(4), Padding = new Thickness(7), FontSize = 16 };
+        var number = Box(); var manufacture = new DatePicker { SelectedDate = DateTime.Today, Margin = new Thickness(4), Padding = new Thickness(5) }; var notes = Box();
+        var expiry = new TextBlock { Margin = new Thickness(4, 7, 4, 10), FontWeight = FontWeights.SemiBold, Foreground = System.Windows.Media.Brushes.DarkSlateGray };
+        var analyses = new TextBlock { Margin = new Thickness(4, 7, 4, 7), TextWrapping = TextWrapping.Wrap, Foreground = System.Windows.Media.Brushes.DimGray };
+        void UpdateSummary()
+        {
+            if (product.SelectedItem is not Product selected || manufacture.SelectedDate is not DateTime date) return;
+            expiry.Text = $"Validade calculada: {DateOnly.FromDateTime(date).AddMonths(selected.ShelfLifeMonths):dd/MM/yyyy}";
+            var active = selected.Specifications.Single(x => x.IsActive);
+            analyses.Text = "Análises deste produto: " + string.Join(" • ", active.Parameters.OrderBy(x => x.SortOrder).Select(x => x.AnalysisParameter.Name));
+        }
+        product.SelectionChanged += (_, _) => UpdateSummary(); manufacture.SelectedDateChanged += (_, _) => UpdateSummary(); UpdateSummary();
+        var dialog = Form(owner, "Abrir novo lote", ("Produto", product), ("Número do lote", number), ("Data de fabricação", manufacture), ("", expiry), ("Observação (opcional)", notes), ("", analyses));
+        dialog.Width = 620;
+        if (dialog.ShowDialog() != true) return null;
+        if (manufacture.SelectedDate is not DateTime manufactureDate || string.IsNullOrWhiteSpace(number.Text)) { Alert("Informe o número do lote e a data corretamente."); return null; }
+        var date = DateOnly.FromDateTime(manufactureDate);
         var selected = (Product)product.SelectedItem; var spec = selected.Specifications.Single(x => x.IsActive);
-        if (await db.Lots.AnyAsync(x => x.ProductId == selected.Id && x.Number == number.Text.Trim())) { Alert("Esse lote já existe para o produto."); return false; }
-        var lot = LotFactory.Create(number.Text, selected, spec, date, 0m, origin.Text.Trim(), DateTimeOffset.Now);
+        if (await db.Lots.AnyAsync(x => x.ProductId == selected.Id && x.Number == number.Text.Trim())) { Alert("Esse lote já existe para o produto."); return null; }
+        var lot = LotFactory.Create(number.Text, selected, spec, date, 0m, "Produção", DateTimeOffset.Now); lot.Notes = notes.Text.Trim();
         db.Lots.Add(lot); db.AuditEntries.Add(new AuditEntry { UserId = userId, OccurredAt = lot.OpenedAt, EntityName = nameof(Lot), EntityId = lot.Id.ToString(), Action = "Aberto", NewValue = lot.Number });
-        await db.SaveChangesAsync(); return true;
+        await db.SaveChangesAsync(); return lot.Id;
     }
 
     public static async Task<Certificate?> IssueCertificateAsync(Window owner, DbContextOptions<LabDbContext> options, Guid userId, string dataRoot)
@@ -222,7 +311,7 @@ internal static class CatalogDialogs
         var value = Box(); var dialog = Form(owner, title, (label, value)); return dialog.ShowDialog() == true && !string.IsNullOrWhiteSpace(value.Text) ? value.Text.Trim() : null;
     }
 
-    private static Window Form(Window owner, string title, params (string Label, Control Input)[] fields)
+    private static Window Form(Window owner, string title, params (string Label, FrameworkElement Input)[] fields)
     {
         var stack = new StackPanel { Margin = new Thickness(20) };
         foreach (var (label, input) in fields) { stack.Children.Add(new TextBlock { Text = label, Margin = new Thickness(4, 8, 4, 0) }); stack.Children.Add(input); }
@@ -233,6 +322,11 @@ internal static class CatalogDialogs
         cancel.Click += (_, _) => window.DialogResult = false; save.Click += (_, _) => window.DialogResult = true; return window;
     }
     private static TextBox Box(string value = "") => new() { Text = value, Margin = new Thickness(4), Padding = new Thickness(7) };
+    private static ComboBox FamilyBox(string? selected = null)
+    {
+        var value = ProductFamilies.Standard.Contains(selected ?? "") ? selected! : ProductFamilies.Infer(selected);
+        return new ComboBox { ItemsSource = ProductFamilies.Standard, SelectedItem = value, Margin = new Thickness(4), Padding = new Thickness(7) };
+    }
     private static ComboBox CategoryBox(ParameterCategory? selected = null)
     {
         var items = Enum.GetValues<ParameterCategory>().Select(x => new EnumOption<ParameterCategory>(x, PortugueseLabels.Category(x))).ToList();
@@ -242,6 +336,11 @@ internal static class CatalogDialogs
     {
         var items = Enum.GetValues<ResultType>().Select(x => new EnumOption<ResultType>(x, PortugueseLabels.ResultType(x))).ToList();
         return new ComboBox { ItemsSource = items, DisplayMemberPath = "Label", SelectedItem = items.Single(x => x.Value == (selected ?? ResultType.Numeric)), Margin = new Thickness(4), Padding = new Thickness(5) };
+    }
+    private static ComboBox RoleBox(UserRole selected = UserRole.Analyst)
+    {
+        var items = Enum.GetValues<UserRole>().Select(x => new EnumOption<UserRole>(x, PortugueseLabels.UserRole(x))).ToList();
+        return new ComboBox { ItemsSource = items, DisplayMemberPath = "Label", SelectedItem = items.Single(x => x.Value == selected), Margin = new Thickness(4), Padding = new Thickness(5) };
     }
     private static decimal? ParseOptional(string text) { if (string.IsNullOrWhiteSpace(text)) return null; if (!BrazilianDecimal.TryParse(text, out var value)) throw new InvalidOperationException($"Número inválido: {text}"); return value; }
     private static void Alert(string message) => MessageBox.Show(message, "LabQC", MessageBoxButton.OK, MessageBoxImage.Warning);

@@ -10,6 +10,21 @@ public enum CertificateStatus { Current, Superseded, Cancelled }
 
 public abstract class Entity { public Guid Id { get; set; } = Guid.NewGuid(); }
 
+public static class ProductFamilies
+{
+    public static IReadOnlyList<string> Standard { get; } = ["Farinha", "Polvilho", "Fécula", "Amido", "Outros"];
+
+    public static string Infer(string? productName)
+    {
+        var name = productName ?? "";
+        if (name.Contains("farinha", StringComparison.OrdinalIgnoreCase)) return "Farinha";
+        if (name.Contains("polvilho", StringComparison.OrdinalIgnoreCase)) return "Polvilho";
+        if (name.Contains("fécula", StringComparison.OrdinalIgnoreCase) || name.Contains("fecula", StringComparison.OrdinalIgnoreCase)) return "Fécula";
+        if (name.Contains("amido", StringComparison.OrdinalIgnoreCase)) return "Amido";
+        return "Outros";
+    }
+}
+
 public sealed class User : Entity
 {
     public string Username { get; set; } = "";
@@ -24,6 +39,7 @@ public sealed class User : Entity
 public sealed class Product : Entity
 {
     public string Code { get; set; } = "";
+    public string Family { get; set; } = "Outros";
     public string Name { get; set; } = "";
     public string Description { get; set; } = "";
     public string CommercialUnit { get; set; } = "";

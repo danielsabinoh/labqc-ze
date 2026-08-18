@@ -3,6 +3,8 @@ using LabQC.Domain;
 using LabQC.Reports;
 using LabQC.Infrastructure;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 
 namespace LabQC.Tests;
 
@@ -14,6 +16,33 @@ public sealed class DomainTests
     {
         var product = new Product { Name = "Farinha de mandioca branca fina", CommercialUnit = "saco 50 kg" };
         Assert.Equal("Farinha de mandioca branca fina — saco 50 kg", product.DisplayName);
+    }
+
+    [Theory]
+    [InlineData("Farinha de mandioca branca", "Farinha")]
+    [InlineData("Polvilho azedo", "Polvilho")]
+    [InlineData("Fécula de mandioca", "Fécula")]
+    [InlineData("Produto especial", "Outros")]
+    public void ProductFamilyIsInferredFromExistingName(string name, string expected) => Assert.Equal(expected, ProductFamilies.Infer(name));
+
+    [Fact]
+    public async Task ProductFamilyMigrationClassifiesExistingProducts()
+    {
+        var path = Path.Combine(Path.GetTempPath(), $"labqc-family-{Guid.NewGuid():N}.db");
+        try
+        {
+            var options = new DbContextOptionsBuilder<LabDbContext>().UseSqlite($"Data Source={path};Pooling=False").Options;
+            await using (var db = new LabDbContext(options))
+            {
+                var migrator = db.GetService<IMigrator>();
+                await migrator.MigrateAsync("20260814174150_UserPasswordLifecycle");
+                await db.Database.ExecuteSqlRawAsync("INSERT INTO Products (Id, Code, CommercialUnit, Description, IsActive, Name, ShelfLifeMonths) VALUES ('11111111-1111-1111-1111-111111111111', 'FAR-TESTE', 'saco 50 kg', '', 1, 'Farinha de mandioca branca', 12)");
+                await migrator.MigrateAsync();
+            }
+            await using (var verification = new LabDbContext(options))
+                Assert.Equal("Farinha", (await verification.Products.SingleAsync()).Family);
+        }
+        finally { if (File.Exists(path)) File.Delete(path); }
     }
 
     [Fact] public void TechnicalEnumsHavePortugueseLabels()
