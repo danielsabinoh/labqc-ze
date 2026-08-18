@@ -17,10 +17,10 @@ Para testes ou instalação portátil, defina `LABQC_DATA_DIR` para outra pasta 
 2. Abra **Produtos** e use **+ Parâmetro** para cadastrar Umidade, Acidez, pH etc.
 3. Use **+ Produto** para cadastrar o produto.
 4. Clique em **Nova versão da especificação**, escolha o produto, marque os parâmetros e configure limites e consolidação.
-5. Abra **Lotes e histórico** e clique em **+ Abrir novo lote**. A especificação ativa será congelada no lote.
-6. Abra **Lançar análises**, selecione o lote, crie amostras, preencha os resultados e salve.
-7. Em **Lotes e histórico**, selecione o lote, clique em **Enviar para liberação** e depois em **Aprovar** (perfil Qualidade ou Administrador).
-8. Abra **Certificados**, clique em **Emitir certificado / laudo**, informe cliente, NF e quantidade e gere o PDF A4.
+5. Abra **Lotes e histórico** e clique em **+ Abrir novo lote**. A configuração ativa será congelada no lote.
+6. Abra **Lançar análises**, selecione o lote, crie amostras, preencha os resultados e salve. Enter desce na coluna; `Ctrl+N` cria uma amostra e `Ctrl+S` salva.
+7. Quando a produção terminar, selecione o lote em **Lotes e histórico** e clique em **Fechar lote**. Dois cliques abrem o resumo completo das análises.
+8. Abra **Certificados**, clique em **Emitir certificado / laudo**, informe cliente, NF e quantidade e gere o PDF A4. Somente lotes fechados ficam disponíveis para emissão.
 
 O PDF fica em `%LOCALAPPDATA%\LabQC\Certificados` e também pode ser aberto pela lista de certificados. A emissão guarda snapshot dos resultados e SHA-256 do arquivo.
 

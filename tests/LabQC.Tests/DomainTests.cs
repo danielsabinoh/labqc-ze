@@ -97,4 +97,27 @@ public sealed class DomainTests
         }
         finally { if (File.Exists(path)) File.Delete(path); }
     }
+
+    [Fact] public async Task ResultsCanBeCorrectedWhileOpenButNotAfterLotIsClosed()
+    {
+        var path = Path.Combine(Path.GetTempPath(), $"labqc_results_{Guid.NewGuid():N}.db");
+        var options = new DbContextOptionsBuilder<LabDbContext>().UseSqlite($"Data Source={path};Pooling=False").Options;
+        try
+        {
+            await using var db = new LabDbContext(options); await db.Database.MigrateAsync();
+            var user = new User { Username = "analista", FullName = "Analista", PasswordHash = "x", Role = UserRole.Analyst };
+            var product = new Product { Code = "P2", Name = "Produto", CommercialUnit = "kg" };
+            var lot = new Lot { Number = "L2", Product = product, ProductSpecificationId = Guid.NewGuid(), ManufactureDate = DateOnly.FromDateTime(DateTime.Today), ExpiryDate = DateOnly.FromDateTime(DateTime.Today.AddMonths(1)), OpenedAt = DateTimeOffset.Now, Status = LotStatus.InAnalysis };
+            var parameter = new LotParameter { Lot = lot, SourceParameterId = Guid.NewGuid(), ParameterCode = "UMI", ParameterName = "Umidade", ResultType = ResultType.Numeric, ConsolidationMethod = ConsolidationMethod.Average };
+            var sample = new Sample { Lot = lot, Code = "01", CollectedAt = DateTimeOffset.Now };
+            db.AddRange(user, product, lot, parameter, sample); await db.SaveChangesAsync();
+            var service = new AnalysisEntryService(db);
+            await service.SaveCorrectionSafeAsync(sample.Id, parameter.Id, 8.1m, null, null, user, null);
+            await service.SaveCorrectionSafeAsync(sample.Id, parameter.Id, 8.2m, null, null, user, "Correção de digitação");
+            Assert.Equal(2, await db.AnalysisResults.CountAsync()); Assert.Equal(8.2m, (await db.AnalysisResults.SingleAsync(x => x.IsCurrent)).NumericValue);
+            lot.Status = LotStatus.Closed; await db.SaveChangesAsync();
+            await Assert.ThrowsAsync<InvalidOperationException>(() => service.SaveCorrectionSafeAsync(sample.Id, parameter.Id, 8.3m, null, null, user, "Nova correção"));
+        }
+        finally { if (File.Exists(path)) File.Delete(path); }
+    }
 }

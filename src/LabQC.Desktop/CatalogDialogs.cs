@@ -166,13 +166,13 @@ internal static class CatalogDialogs
         products = products.Where(x => x.Specifications.Any(s => s.IsActive)).ToList();
         if (products.Count == 0) { Alert("Nenhum produto possui especificação ativa. Crie uma versão da especificação primeiro."); return false; }
         var product = new ComboBox { ItemsSource = products, DisplayMemberPath = "DisplayName", SelectedIndex = 0, Margin = new Thickness(4) };
-        var number = Box(); var origin = Box("Produção"); var manufacture = Box(DateTime.Today.ToString("dd/MM/yyyy")); var quantity = Box();
-        var dialog = Form(owner, "Abrir novo lote", ("Produto", product), ("Número do lote", number), ("Origem", origin), ("Data de fabricação", manufacture), ("Quantidade produzida", quantity));
+        var number = Box(); var origin = Box("Produção"); var manufacture = Box(DateTime.Today.ToString("dd/MM/yyyy"));
+        var dialog = Form(owner, "Abrir novo lote", ("Produto", product), ("Número do lote", number), ("Origem", origin), ("Data de fabricação", manufacture));
         if (dialog.ShowDialog() != true) return false;
-        if (!DateOnly.TryParseExact(manufacture.Text.Trim(), "dd/MM/yyyy", null, System.Globalization.DateTimeStyles.None, out var date) || !BrazilianDecimal.TryParse(quantity.Text, out var amount) || amount <= 0 || string.IsNullOrWhiteSpace(number.Text)) { Alert("Informe lote, data e quantidade corretamente."); return false; }
+        if (!DateOnly.TryParseExact(manufacture.Text.Trim(), "dd/MM/yyyy", null, System.Globalization.DateTimeStyles.None, out var date) || string.IsNullOrWhiteSpace(number.Text)) { Alert("Informe o número do lote e a data corretamente."); return false; }
         var selected = (Product)product.SelectedItem; var spec = selected.Specifications.Single(x => x.IsActive);
         if (await db.Lots.AnyAsync(x => x.ProductId == selected.Id && x.Number == number.Text.Trim())) { Alert("Esse lote já existe para o produto."); return false; }
-        var lot = LotFactory.Create(number.Text, selected, spec, date, amount, origin.Text.Trim(), DateTimeOffset.Now);
+        var lot = LotFactory.Create(number.Text, selected, spec, date, 0m, origin.Text.Trim(), DateTimeOffset.Now);
         db.Lots.Add(lot); db.AuditEntries.Add(new AuditEntry { UserId = userId, OccurredAt = lot.OpenedAt, EntityName = nameof(Lot), EntityId = lot.Id.ToString(), Action = "Aberto", NewValue = lot.Number });
         await db.SaveChangesAsync(); return true;
     }
@@ -180,14 +180,14 @@ internal static class CatalogDialogs
     public static async Task<Certificate?> IssueCertificateAsync(Window owner, DbContextOptions<LabDbContext> options, Guid userId, string dataRoot)
     {
         await using var db = new LabDbContext(options);
-        var lots = await db.Lots.Include(x => x.Product).Include(x => x.Parameters).Where(x => x.Status == LotStatus.Approved).ToListAsync();
+        var lots = await db.Lots.Include(x => x.Product).Include(x => x.Parameters).Where(x => x.Status == LotStatus.Closed).ToListAsync();
         lots = lots.OrderByDescending(x => x.OpenedAt).ToList();
-        if (lots.Count == 0) { Alert("Não há lote aprovado disponível. Libere e aprove o lote primeiro."); return null; }
+        if (lots.Count == 0) { Alert("Não há lote fechado disponível. Feche o lote antes de emitir o laudo."); return null; }
         var lotBox = new ComboBox { ItemsSource = lots, DisplayMemberPath = "Number", SelectedIndex = 0, Margin = new Thickness(4) };
         var client = Box(); var city = Box(); var state = Box(); var invoice = Box(); var quantity = Box(); var unit = Box();
         lotBox.SelectionChanged += (_, _) => { if (lotBox.SelectedItem is Lot l) { quantity.Text = l.QuantityProduced.ToString("N2", System.Globalization.CultureInfo.GetCultureInfo("pt-BR")); unit.Text = l.Unit; } };
         if (lots[0] is { } initial) { quantity.Text = initial.QuantityProduced.ToString("N2", System.Globalization.CultureInfo.GetCultureInfo("pt-BR")); unit.Text = initial.Unit; }
-        var dialog = Form(owner, "Emitir certificado de análises", ("Lote aprovado", lotBox), ("Cliente", client), ("Cidade", city), ("UF", state), ("Nota fiscal", invoice), ("Quantidade certificada", quantity), ("Unidade", unit));
+        var dialog = Form(owner, "Emitir certificado de análises", ("Lote fechado", lotBox), ("Cliente", client), ("Cidade", city), ("UF", state), ("Nota fiscal", invoice), ("Quantidade certificada", quantity), ("Unidade", unit));
         if (dialog.ShowDialog() != true) return null;
         if (string.IsNullOrWhiteSpace(client.Text) || !BrazilianDecimal.TryParse(quantity.Text, out var amount) || amount <= 0) { Alert("Informe cliente e quantidade corretamente."); return null; }
         var lot = (Lot)lotBox.SelectedItem;
@@ -212,7 +212,7 @@ internal static class CatalogDialogs
         certificate.SnapshotJson = JsonSerializer.Serialize(new { certificate.Number, certificate.Version, certificate.ProductName, certificate.LotNumber, certificate.ClientName, certificate.City, certificate.State, certificate.InvoiceNumber, certificate.CertifiedQuantity, certificate.QuantityUnit, certificate.ManufactureDate, certificate.ExpiryDate, Results = certificate.Results.Select(x => new { x.ParameterName, x.Result, x.Unit, x.Specification, x.Conformity }) });
         db.Certificates.Add(certificate); db.Clients.Add(new Client { Name = certificate.ClientName, City = certificate.City, State = certificate.State });
         await db.SaveChangesAsync();
-        new CertificatePdfService().Generate(certificate, "EMPRESA", Path.Combine(dataRoot, "Certificados"));
+        new CertificatePdfService().Generate(certificate, "J. C. Oliveira & Filhos Ltda.", Path.Combine(dataRoot, "Certificados"));
         db.AuditEntries.Add(new AuditEntry { UserId = userId, OccurredAt = certificate.IssuedAt, EntityName = nameof(Certificate), EntityId = certificate.Id.ToString(), Action = "Emitido", NewValue = $"{certificate.Number} v{certificate.Version}" });
         await db.SaveChangesAsync(); return certificate;
     }

@@ -20,8 +20,9 @@ public sealed class AnalysisEntryService(LabDbContext db)
 {
     public async Task<AnalysisResult> SaveCorrectionSafeAsync(Guid sampleId, Guid lotParameterId, decimal? numeric, string? text, bool? conformity, User user, string? reason, CancellationToken ct = default)
     {
+        var lotStatus = await db.Samples.Where(x => x.Id == sampleId).Select(x => x.Lot.Status).SingleAsync(ct);
+        if (lotStatus == LotStatus.Closed) throw new InvalidOperationException("O lote está fechado e não aceita lançamentos ou correções.");
         var previous = await db.AnalysisResults.Where(x => x.SampleId == sampleId && x.LotParameterId == lotParameterId && x.IsCurrent).SingleOrDefaultAsync(ct);
-        if (previous is not null && user.Role == UserRole.Analyst) throw new UnauthorizedAccessException("Somente Qualidade ou Administrador pode corrigir resultado persistido.");
         if (previous is not null && string.IsNullOrWhiteSpace(reason)) throw new InvalidOperationException("A correção exige justificativa.");
         if (previous is not null) previous.IsCurrent = false;
         var result = new AnalysisResult { SampleId = sampleId, LotParameterId = lotParameterId, NumericValue = numeric, TextValue = text, ConformityValue = conformity, Version = (previous?.Version ?? 0) + 1, ReplacesResultId = previous?.Id, EnteredByUserId = user.Id, EnteredAt = DateTimeOffset.Now, CorrectionReason = reason };

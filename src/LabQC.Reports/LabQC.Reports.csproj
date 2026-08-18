@@ -11,4 +11,9 @@
     <PackageReference Include="PDFsharp-MigraDoc" Version="6.2.3" />
   </ItemGroup>
 
+  <ItemGroup>
+    <Content Include="Assets\logo-laudo.jpg" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+    <Content Include="Assets\assinatura.png" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+  </ItemGroup>
+
 </Project>

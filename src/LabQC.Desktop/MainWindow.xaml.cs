@@ -57,7 +57,7 @@ public partial class MainWindow : Window
  {
   await using var db = new LabDbContext(_options);
   InAnalysisCount.Text = (await db.Lots.CountAsync(x => x.Status == LotStatus.InAnalysis)).ToString();
-  AwaitingCount.Text = (await db.Lots.CountAsync(x => x.Status == LotStatus.AwaitingRelease)).ToString();
+  AwaitingCount.Text = (await db.Lots.CountAsync(x => x.Status == LotStatus.Closed)).ToString();
   NonConformityCount.Text = "0";
 
   // SQLite stores DateTimeOffset as TEXT and cannot translate ORDER BY for that CLR type.
@@ -67,7 +67,7 @@ public partial class MainWindow : Window
   var certificates = (await db.Certificates.ToListAsync())
    .OrderByDescending(x => x.IssuedAt).ToList();
 
-  LotPicker.ItemsSource = lots.Select(x => new Picker(x.Id, $"{x.Number} — {x.Product.DisplayName}")).ToList();
+  LotPicker.ItemsSource = lots.Where(x => x.Status == LotStatus.InAnalysis).Select(x => new Picker(x.Id, $"{x.Number} — {x.Product.DisplayName}")).ToList();
   LotsGrid.ItemsSource = lots.Select(x => new LotRow(x.Id, x.Number, x.Product.DisplayName, x.ManufactureDate, PortugueseLabels.LotStatus(x.Status))).ToList();
   var products = await db.Products.OrderBy(x => x.Name).ThenBy(x => x.CommercialUnit).ToListAsync();
   ProductsGrid.ItemsSource = products.Select(x => new ProductRow(x.Id, x.Code, x.DisplayName, x.ShelfLifeMonths + " meses", PortugueseLabels.Active(x.IsActive))).ToList();
@@ -88,31 +88,20 @@ public partial class MainWindow : Window
  private async void DeleteParameter_Click(object s, RoutedEventArgs e) { if (_user is null || !RequireAdministrator()) return; if (ParametersGrid.SelectedItem is not ParameterRow row) { MessageBox.Show("Selecione um parâmetro.", "LabQC"); return; } if (await CatalogDialogs.DeleteParameterAsync(this, _options, row.Id, _user.Id)) await RefreshAsync(); }
  private async void NewLot_Click(object s, RoutedEventArgs e) { if (_user is not null && await CatalogDialogs.NewLotAsync(this, _options, _user.Id)) { await RefreshAsync(); MessageBox.Show("Lote aberto com a especificação congelada.", "LabQC"); } }
  private async void Refresh_Click(object s, RoutedEventArgs e) => await RefreshAsync();
- private async Task ChangeLotStatusAsync(LotStatus target, string justification = "")
+ private async void CloseLot_Click(object s, RoutedEventArgs e)
  {
-  try
-  {
-   if (_user is null || LotsGrid.SelectedItem is not LotRow selected) { MessageBox.Show("Selecione um lote na lista.", "LabQC"); return; }
-   await using var db = new LabDbContext(_options);
-   var lot = await db.Lots.AsNoTracking().SingleAsync(x => x.Id == selected.Id); var old = lot.Status; var now = DateTimeOffset.Now;
-   // Reuse the domain rules without keeping a stale tracked entity in the WPF session.
-   var release = LotWorkflow.Transition(lot, target, _user, justification, now);
-   await using var transaction = await db.Database.BeginTransactionAsync();
-   var affected = await db.Lots.Where(x => x.Id == lot.Id && x.Status == old).ExecuteUpdateAsync(setters => setters.SetProperty(x => x.Status, target));
-   if (affected == 0)
-   {
-    await transaction.RollbackAsync(); await RefreshAsync();
-    MessageBox.Show("O lote foi alterado por outra ação. A lista foi atualizada; selecione-o novamente.", "Lote atualizado", MessageBoxButton.OK, MessageBoxImage.Information); return;
-   }
-   db.LotReleases.Add(release);
-   db.AuditEntries.Add(new AuditEntry { UserId = _user.Id, OccurredAt = now, EntityName = nameof(Lot), EntityId = lot.Id.ToString(), Action = "Situação alterada", OldValue = old.ToString(), NewValue = target.ToString(), Justification = justification });
-   await db.SaveChangesAsync(); await transaction.CommitAsync(); await RefreshAsync();
-  }
-  catch (Exception error) { MessageBox.Show(error.Message, "Não foi possível alterar o lote", MessageBoxButton.OK, MessageBoxImage.Warning); }
+  if (_user is null || LotsGrid.SelectedItem is not LotRow selected) { MessageBox.Show("Selecione um lote.", "LabQC"); return; }
+  if (MessageBox.Show($"Fechar o lote {selected.Lote}?\n\nDepois disso não será possível lançar nem corrigir análises, mas o histórico e a emissão do laudo continuarão disponíveis.", "Fechar lote", MessageBoxButton.YesNo, MessageBoxImage.Warning) != MessageBoxResult.Yes) return;
+  await using var db = new LabDbContext(_options); var lot = await db.Lots.SingleAsync(x => x.Id == selected.Id);
+  if (lot.Status == LotStatus.Closed) { MessageBox.Show("Este lote já está fechado.", "LabQC"); return; }
+  var old = lot.Status; lot.Status = LotStatus.Closed;
+  db.AuditEntries.Add(new AuditEntry { UserId = _user.Id, OccurredAt = DateTimeOffset.Now, EntityName = nameof(Lot), EntityId = lot.Id.ToString(), Action = "Lote fechado", OldValue = old.ToString(), NewValue = LotStatus.Closed.ToString() });
+  await db.SaveChangesAsync(); await RefreshAsync(); MessageBox.Show("Lote fechado. Ele já está disponível para emissão do laudo.", "LabQC");
  }
- private async void SubmitLot_Click(object s, RoutedEventArgs e) => await ChangeLotStatusAsync(LotStatus.AwaitingRelease);
- private async void ApproveLot_Click(object s, RoutedEventArgs e) => await ChangeLotStatusAsync(LotStatus.Approved, "Revisado e aprovado pelo responsável");
- private async void RejectLot_Click(object s, RoutedEventArgs e) { var reason = CatalogDialogs.AskText(this, "Reprovar lote", "Justificativa obrigatória"); if (reason is not null) await ChangeLotStatusAsync(LotStatus.Rejected, reason); }
+ private async void LotsGrid_MouseDoubleClick(object s, MouseButtonEventArgs e)
+ {
+  if (LotsGrid.SelectedItem is LotRow selected) await LotDetailsDialog.ShowAsync(this, _options, selected.Id);
+ }
  private async void IssueCertificate_Click(object s, RoutedEventArgs e)
  {
   if (_user is null || _user.Role == UserRole.Analyst) { MessageBox.Show("A emissão exige perfil Qualidade ou Administrador.", "LabQC"); return; }
@@ -134,7 +123,10 @@ public partial class MainWindow : Window
    AnalysisGrid.CommitEdit(); AnalysisGrid.CommitEdit();
    await using var db = new LabDbContext(_options);
    var lot = await db.Lots.Include(x => x.Parameters).Include(x => x.Samples).SingleAsync(x => x.Id == picker.Id);
+   if (lot.Status == LotStatus.Closed) { MessageBox.Show("Este lote está fechado e não aceita novos lançamentos ou correções.", "Lote fechado", MessageBoxButton.OK, MessageBoxImage.Warning); return; }
+   await using var transaction = await db.Database.BeginTransactionAsync();
    var parameters = lot.Parameters.OrderBy(x => x.SortOrder).ToList(); var service = new AnalysisEntryService(db); var saved = 0;
+   string? correctionReason = null;
    foreach (DataRow row in _table.Rows)
    {
     var code = row[0]?.ToString()?.Trim(); if (string.IsNullOrWhiteSpace(code)) continue;
@@ -143,7 +135,6 @@ public partial class MainWindow : Window
     for (var i = 0; i < parameters.Count; i++)
     {
      var raw = row[i + 1]?.ToString()?.Trim(); if (string.IsNullOrWhiteSpace(raw)) continue;
-     if (await db.AnalysisResults.AnyAsync(x => x.SampleId == sample.Id && x.LotParameterId == parameters[i].Id && x.IsCurrent)) continue;
      decimal? numeric = null; string? text = null; bool? conformity = null;
      if (parameters[i].ResultType == ResultType.Numeric)
      {
@@ -157,15 +148,37 @@ public partial class MainWindow : Window
       else throw new InvalidOperationException($"Use Conforme ou Não conforme em {parameters[i].ParameterName}.");
      }
      else text = raw;
-     await service.SaveCorrectionSafeAsync(sample.Id, parameters[i].Id, numeric, text, conformity, _user, null); saved++;
+     var previous = await db.AnalysisResults.SingleOrDefaultAsync(x => x.SampleId == sample.Id && x.LotParameterId == parameters[i].Id && x.IsCurrent);
+     if (previous is not null)
+     {
+      var unchanged = previous.NumericValue == numeric && string.Equals(previous.TextValue?.Trim(), text?.Trim(), StringComparison.Ordinal) && previous.ConformityValue == conformity;
+      if (unchanged) continue;
+      correctionReason ??= CatalogDialogs.AskText(this, "Corrigir resultado", "Motivo da alteração (obrigatório)");
+      if (correctionReason is null) { await transaction.RollbackAsync(); return; }
+     }
+     await service.SaveCorrectionSafeAsync(sample.Id, parameters[i].Id, numeric, text, conformity, _user, previous is null ? null : correctionReason); saved++;
     }
    }
+   await transaction.CommitAsync();
    MessageBox.Show($"{saved} resultado(s) salvo(s).", "LabQC", MessageBoxButton.OK, MessageBoxImage.Information);
-   LotPicker_SelectionChanged(LotPicker, null); await RefreshAsync();
+   var selectedId = picker.Id; await RefreshAsync(); LotPicker.SelectedItem = LotPicker.Items.Cast<Picker>().FirstOrDefault(x => x.Id == selectedId);
   }
   catch (Exception error) { MessageBox.Show(error.Message, "Não foi possível salvar", MessageBoxButton.OK, MessageBoxImage.Error); }
  }
- private void AnalysisGrid_PreviewKeyDown(object s, KeyEventArgs e) { if(e.Key==Key.Enter){e.Handled=true;AnalysisGrid.CommitEdit();var n=AnalysisGrid.Columns.IndexOf(AnalysisGrid.CurrentCell.Column)+1;if(n>=AnalysisGrid.Columns.Count){NewSample_Click(s,e);return;}AnalysisGrid.CurrentCell=new DataGridCellInfo(AnalysisGrid.CurrentItem,AnalysisGrid.Columns[n]);AnalysisGrid.BeginEdit();} if(e.Key==Key.N&&Keyboard.Modifiers==ModifierKeys.Control){e.Handled=true;NewSample_Click(s,e);} if(e.Key==Key.S&&Keyboard.Modifiers==ModifierKeys.Control){e.Handled=true;SaveAnalysis_Click(s,e);} }
+ private void AnalysisGrid_PreviewKeyDown(object s, KeyEventArgs e)
+ {
+  if (e.Key == Key.Enter)
+  {
+   e.Handled = true; var column = AnalysisGrid.CurrentCell.Column; var rowIndex = AnalysisGrid.Items.IndexOf(AnalysisGrid.CurrentItem);
+   AnalysisGrid.CommitEdit(); AnalysisGrid.CommitEdit();
+   if (column is not null && rowIndex >= 0 && rowIndex + 1 < AnalysisGrid.Items.Count)
+   {
+    var nextRow = AnalysisGrid.Items[rowIndex + 1]; AnalysisGrid.SelectedItem = nextRow; AnalysisGrid.CurrentCell = new DataGridCellInfo(nextRow, column); AnalysisGrid.ScrollIntoView(nextRow, column); AnalysisGrid.BeginEdit();
+   }
+  }
+  if (e.Key == Key.N && Keyboard.Modifiers == ModifierKeys.Control) { e.Handled = true; NewSample_Click(s, e); }
+  if (e.Key == Key.S && Keyboard.Modifiers == ModifierKeys.Control) { e.Handled = true; SaveAnalysis_Click(s, e); }
+ }
  private async void Backup_Click(object s, RoutedEventArgs e) { var dir=Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments),"LabQC Backups");var svc=new BackupService(Path.Combine(_root,"labqc.db"),Path.Combine(_root,"Certificados"));var p=await svc.CreateAsync(dir);BackupStatus.Text=$"Criado e verificado: {p}\n{await BackupService.VerifyAsync(p)}"; }
  private async void VerifyBackup_Click(object s, RoutedEventArgs e) { var d=new OpenFileDialog{Filter="Backup LabQC|*.labbackup"};if(d.ShowDialog()==true)BackupStatus.Text=await BackupService.VerifyAsync(d.FileName)?"Backup íntegro.":"Backup inválido."; }
  private sealed record Picker(Guid Id,string Display);
