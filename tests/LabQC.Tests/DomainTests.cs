@@ -12,6 +12,37 @@ public sealed class DomainTests
 {
     [Fact] public void DecimalPtBrIsParsed() { Assert.True(BrazilianDecimal.TryParse("8,104", out var value)); Assert.Equal(8.104m, value); }
 
+    [Fact]
+    public void NfeXmlFillsCustomerInvoiceAndItems()
+    {
+        const string xml = """
+            <?xml version="1.0" encoding="UTF-8"?>
+            <nfeProc xmlns="http://www.portalfiscal.inf.br/nfe" versao="4.00">
+              <NFe><infNFe Id="NFe41260878704090000130550010000481021000000010" versao="4.00">
+                <ide><nNF>48102</nNF></ide>
+                <dest><xNome>CLIENTE TESTE LTDA</xNome><enderDest><xMun>Maringá</xMun><UF>PR</UF></enderDest></dest>
+                <det nItem="1"><prod><cProd>ABC</cProd><xProd>FARINHA MANDIOCA BRANCA</xProd><qCom>800.0000</qCom><uCom>SC</uCom><vUnCom>120.50</vUnCom></prod></det>
+                <det nItem="2"><prod><cProd>XYZ</cProd><xProd>POLVILHO AZEDO</xProd><qCom>25.0000</qCom><uCom>KG</uCom><vUnCom>9.10</vUnCom></prod></det>
+              </infNFe></NFe>
+            </nfeProc>
+            """;
+        var result = NfeXmlImporter.Parse(xml);
+        Assert.Equal("48102", result.InvoiceNumber);
+        Assert.Equal("CLIENTE TESTE LTDA", result.ClientName);
+        Assert.Equal("Maringá", result.City);
+        Assert.Equal("PR", result.State);
+        Assert.Equal(2, result.Items.Count);
+        Assert.Equal(800m, result.Items[0].Quantity);
+        Assert.Equal("SC", result.Items[0].Unit);
+    }
+
+    [Fact]
+    public void NfeXmlRejectsExternalEntities()
+    {
+        const string xml = "<!DOCTYPE nfeProc [<!ENTITY arquivo SYSTEM 'file:///C:/Windows/win.ini'>]><nfeProc>&arquivo;</nfeProc>";
+        Assert.Throws<System.Xml.XmlException>(() => NfeXmlImporter.Parse(xml));
+    }
+
     [Fact] public void ProductDisplayNameIncludesCommercialUnit()
     {
         var product = new Product { Name = "Farinha de mandioca branca fina", CommercialUnit = "saco 50 kg" };

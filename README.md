@@ -22,6 +22,8 @@ Para testes ou instalação portátil, defina `LABQC_DATA_DIR` para outra pasta 
 7. Quando a produção terminar, selecione o lote em **Lotes e histórico** e clique em **Fechar lote**. Dois cliques abrem o resumo completo das análises.
 8. Abra **Certificados**, clique em **Emitir certificado / laudo**, informe cliente, NF e quantidade e gere o PDF A4. Somente lotes fechados ficam disponíveis para emissão.
 
+Na emissão do laudo, o botão **Importar XML da NF-e** preenche automaticamente destinatário, cidade, UF, número da nota e quantidade. O lote, o produto e a unidade continuam vindo do cadastro do LabQC. Quando a NF-e possui vários itens, o sistema solicita qual item fornecerá a quantidade do certificado. O preenchimento manual continua disponível.
+
 O PDF fica em `%LOCALAPPDATA%\LabQC\Certificados` e também pode ser aberto pela lista de certificados. A emissão guarda snapshot dos resultados e SHA-256 do arquivo.
 
 Alterar uma especificação cria outra versão; lotes antigos continuam ligados ao snapshot anterior.

@@ -9,6 +9,7 @@ using LabQC.Domain;
 using LabQC.Infrastructure;
 using LabQC.Reports;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Win32;
 
 namespace LabQC.Desktop;
 
@@ -274,9 +275,46 @@ internal static class CatalogDialogs
         if (lots.Count == 0) { Alert("Não há lote fechado disponível. Feche o lote antes de emitir o laudo."); return null; }
         var lotBox = new ComboBox { ItemsSource = lots, DisplayMemberPath = "Number", SelectedIndex = 0, Margin = new Thickness(4) };
         var client = Box(); var city = Box(); var state = Box(); var invoice = Box(); var quantity = Box(); var unit = Box();
-        lotBox.SelectionChanged += (_, _) => { if (lotBox.SelectedItem is Lot l) { quantity.Text = l.QuantityProduced.ToString("N2", System.Globalization.CultureInfo.GetCultureInfo("pt-BR")); unit.Text = l.Unit; } };
+        NfeXmlData? importedNfe = null; NfeXmlItem? importedItem = null;
+        lotBox.SelectionChanged += (_, _) =>
+        {
+            if (lotBox.SelectedItem is not Lot selectedLot) return;
+            unit.Text = selectedLot.Unit;
+            if (importedItem is null) quantity.Text = selectedLot.QuantityProduced.ToString("N2", System.Globalization.CultureInfo.GetCultureInfo("pt-BR"));
+        };
         if (lots[0] is { } initial) { quantity.Text = initial.QuantityProduced.ToString("N2", System.Globalization.CultureInfo.GetCultureInfo("pt-BR")); unit.Text = initial.Unit; }
-        var dialog = Form(owner, "Emitir certificado de análises", ("Lote fechado", lotBox), ("Cliente", client), ("Cidade", city), ("UF", state), ("Nota fiscal", invoice), ("Quantidade certificada", quantity), ("Unidade", unit));
+        var importStatus = new TextBlock { Text = "Nenhum XML importado. Os campos também podem ser preenchidos manualmente.", Foreground = System.Windows.Media.Brushes.DimGray, TextWrapping = TextWrapping.Wrap, Margin = new Thickness(4, 3, 4, 8) };
+        var importButton = new Button { Content = "Importar XML da NF-e", Margin = new Thickness(4), Padding = new Thickness(14, 8, 14, 8), HorizontalAlignment = HorizontalAlignment.Left };
+        var dialog = Form(owner, "Emitir certificado de análises", ("Lote fechado / produto do sistema", lotBox), ("Preenchimento automático (opcional)", importButton), ("", importStatus), ("Cliente", client), ("Cidade", city), ("UF", state), ("Nota fiscal", invoice), ("Quantidade certificada", quantity), ("Unidade", unit));
+        dialog.Width = 620;
+        importButton.Click += (_, _) =>
+        {
+            try
+            {
+                var picker = new OpenFileDialog { Title = "Selecionar XML autorizado da NF-e", Filter = "XML da NF-e (*.xml)|*.xml|Todos os arquivos (*.*)|*.*", CheckFileExists = true, Multiselect = false };
+                if (picker.ShowDialog(dialog) != true) return;
+                var file = new FileInfo(picker.FileName);
+                if (file.Length > 10_000_000) throw new InvalidDataException("O XML excede o limite de 10 MB.");
+                using var stream = file.OpenRead(); var parsed = NfeXmlImporter.Parse(stream);
+                var selectedItem = parsed.Items[0];
+                if (parsed.Items.Count > 1)
+                {
+                    var itemBox = new ComboBox { ItemsSource = parsed.Items, DisplayMemberPath = "Display", SelectedIndex = 0, Margin = new Thickness(4), Padding = new Thickness(6) };
+                    var itemDialog = Form(dialog, "Escolher item da nota fiscal", ("A nota possui mais de um item. Escolha qual será certificado", itemBox)); itemDialog.Width = 760;
+                    if (itemDialog.ShowDialog() != true) return;
+                    selectedItem = (NfeXmlItem)itemBox.SelectedItem;
+                }
+                importedNfe = parsed; importedItem = selectedItem;
+                client.Text = parsed.ClientName; city.Text = parsed.City; state.Text = parsed.State; invoice.Text = parsed.InvoiceNumber;
+                quantity.Text = selectedItem.Quantity.ToString("0.####", System.Globalization.CultureInfo.GetCultureInfo("pt-BR"));
+                importStatus.Text = $"NF-e {parsed.InvoiceNumber} importada • Item: {selectedItem.Description} • Quantidade: {quantity.Text} • Unidade do LabQC: {unit.Text}";
+                importStatus.Foreground = System.Windows.Media.Brushes.DarkGreen;
+            }
+            catch (Exception error)
+            {
+                Alert("Não foi possível importar o XML da NF-e.\n\n" + error.Message);
+            }
+        };
         if (dialog.ShowDialog() != true) return null;
         if (string.IsNullOrWhiteSpace(client.Text) || !BrazilianDecimal.TryParse(quantity.Text, out var amount) || amount <= 0) { Alert("Informe cliente e quantidade corretamente."); return null; }
         var lot = (Lot)lotBox.SelectedItem;
@@ -298,7 +336,7 @@ internal static class CatalogDialogs
             var specification = !string.IsNullOrWhiteSpace(p.SpecificationText) ? p.SpecificationText : string.Join(" / ", new[] { p.Minimum.HasValue ? $"Mín. {BrazilianDecimal.Format(p.Minimum.Value, p.DecimalPlaces)}" : null, p.Maximum.HasValue ? $"Máx. {BrazilianDecimal.Format(p.Maximum.Value, p.DecimalPlaces)}" : null }.Where(x => x is not null));
             certificate.Results.Add(new CertificateResult { ParameterName = p.ParameterName, Category = p.Category, Result = formatted, Unit = p.Unit, Specification = specification, Conformity = result.Conformity, SortOrder = p.SortOrder });
         }
-        certificate.SnapshotJson = JsonSerializer.Serialize(new { certificate.Number, certificate.Version, certificate.ProductName, certificate.LotNumber, certificate.ClientName, certificate.City, certificate.State, certificate.InvoiceNumber, certificate.CertifiedQuantity, certificate.QuantityUnit, certificate.ManufactureDate, certificate.ExpiryDate, Results = certificate.Results.Select(x => new { x.ParameterName, x.Result, x.Unit, x.Specification, x.Conformity }) });
+        certificate.SnapshotJson = JsonSerializer.Serialize(new { certificate.Number, certificate.Version, certificate.ProductName, certificate.LotNumber, certificate.ClientName, certificate.City, certificate.State, certificate.InvoiceNumber, certificate.CertifiedQuantity, certificate.QuantityUnit, certificate.ManufactureDate, certificate.ExpiryDate, NfeAccessKey = importedNfe?.AccessKey, NfeItemCode = importedItem?.Code, NfeItemDescription = importedItem?.Description, Results = certificate.Results.Select(x => new { x.ParameterName, x.Result, x.Unit, x.Specification, x.Conformity }) });
         db.Certificates.Add(certificate); db.Clients.Add(new Client { Name = certificate.ClientName, City = certificate.City, State = certificate.State });
         await db.SaveChangesAsync();
         new CertificatePdfService().Generate(certificate, "J. C. Oliveira & Filhos Ltda.", Path.Combine(dataRoot, "Certificados"));
